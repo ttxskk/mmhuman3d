@@ -1,5 +1,4 @@
 import os
-import warnings
 from pathlib import Path
 
 import mmcv
@@ -387,12 +386,11 @@ def process_mmdet_results(mmdet_results, cat_id=1):
     return person_results
 
 
-def prepare_frames(image_path=None, video_path=None):
-    """Prepare frames from input image path or video path.
+def prepare_frames(input_path=None):
+    """Prepare frames from input_path.
 
     Args:
-        image_path (str, optional): Defaults to None.
-        video_path (str, optional): Defaults to None.
+        input_path (str, optional): Defaults to None.
 
     Raises:
         ValueError: check the input path.
@@ -400,41 +398,40 @@ def prepare_frames(image_path=None, video_path=None):
     Returns:
         List[np.ndarray]: prepared frames
     """
-    if (image_path is not None) and (video_path is not None):
-        warnings.warn('Redundant input, will ignore video')
-    # prepare input
-    if image_path is not None:
-        file_list = []
-        if Path(image_path).is_file():
-            check_input_path(
-                input_path=image_path,
-                path_type='file',
-                allowed_suffix=['.png', '.jpg'])
-            file_list = [image_path]
-        elif Path(image_path).is_dir():
-            file_list = [
-                os.path.join(image_path, fn) for fn in os.listdir(image_path)
-                if fn.lower().endswith(('.png', '.jpg'))
-            ]
+    if Path(input_path).is_file():
+        if input_path.lower().endswith(('.mp4')):
+            input_type = 'video'
+        elif input_path.lower().endswith(('.png', '.jpg')):
+            input_type = 'image'
         else:
-            raise ValueError('Image path should be an image or image folder.'
-                             f' Got invalid image path: {image_path}')
+            raise ValueError('The input file should be an image or a video.'
+                             f' Got invalid file: {input_path}')
+    elif Path(input_path).is_dir():
+        input_type = 'folder'
+    else:
+        raise ValueError('Input path should be an file or folder.'
+                         f' Got invalid input path: {input_path}')
+    # prepare input
+    if input_type == 'image':
+        file_list = [input_path]
+        img_list = [mmcv.imread(img_path) for img_path in file_list]
+        assert len(img_list), f'Failed to load image from {input_path}'
+    elif input_type == 'folder':
+        file_list = [
+            os.path.join(input_path, fn) for fn in os.listdir(input_path)
+            if fn.lower().endswith(('.png', '.jpg'))
+        ]
         file_list.sort()
         img_list = [mmcv.imread(img_path) for img_path in file_list]
-        assert len(img_list), f'Failed to load image from {image_path}'
-    elif video_path is not None:
-        check_input_path(
-            input_path=video_path,
-            path_type='file',
-            allowed_suffix=['.mp4', '.flv'])
-        video = mmcv.VideoReader(video_path)
-        assert video.opened, f'Failed to load video file {video_path}'
+        assert len(img_list), f'Failed to load image from {input_path}'
     else:
-        raise ValueError('No image path or video path provided.')
+        check_input_path(
+            input_path=input_path, path_type='file', allowed_suffix=['.mp4'])
+        video = mmcv.VideoReader(input_path)
+        assert video.opened, f'Failed to load video file {input_path}'
+        img_list = list(video)
 
-    frames_iter = img_list if image_path is not None else list(video)
-
-    return frames_iter
+    return img_list
 
 
 def extract_feature_sequence(extracted_results,
