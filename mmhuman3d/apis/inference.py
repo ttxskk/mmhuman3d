@@ -85,6 +85,95 @@ class LoadImage:
         results['img'] = img
         return results
 
+def run_tensorrt_model(
+    trt_model,
+    img_or_path,
+    det_results,
+    bbox_thr=None,
+    format='xywh',
+    device='cuda'
+):
+    # only two kinds of bbox format is supported.
+    assert format in ['xyxy', 'xywh']
+    mesh_results = []
+    if len(det_results) == 0:
+        return []
+
+    # Change for-loop preprocess each bbox to preprocess all bboxes at once.
+    bboxes = np.array([box['bbox'] for box in det_results])
+
+    # Select bboxes by score threshold
+    if bbox_thr is not None:
+        assert bboxes.shape[1] == 5
+        valid_idx = np.where(bboxes[:, 4] > bbox_thr)[0]
+        bboxes = bboxes[valid_idx]
+        det_results = [det_results[i] for i in valid_idx]
+
+    if format == 'xyxy':
+        bboxes_xyxy = bboxes
+        bboxes_xywh = xyxy2xywh(bboxes)
+    else:
+        # format is already 'xywh'
+        bboxes_xywh = bboxes
+        bboxes_xyxy = xywh2xyxy(bboxes)
+
+    # if bbox_thr remove all bounding box
+    if len(bboxes_xywh) == 0:
+        return []
+
+    img_norm_cfg = dict(
+        mean=[123.675, 116.28, 103.53],
+        std=[58.395, 57.12, 57.375],
+        to_rgb=True
+    )
+    # build the data pipeline
+    inference_pipeline = [
+        LoadImage(),
+        dict(type='MeshAffine', img_res=224),
+        dict(type='Normalize', **img_norm_cfg),
+        dict(type='ImageToTensor', keys=['img']),
+        dict(
+            type='Collect',
+            keys=['img', 'sample_idx'],
+            meta_keys=['image_path', 'center', 'scale', 'rotation'])
+    ] 
+    inference_pipeline = Compose(inference_pipeline)
+
+    assert len(bboxes[0]) in [4, 5]
+
+    batch_data = []
+    input_size = 224
+    aspect_ratio = 1 if isinstance(input_size,
+                                   int) else input_size[0] / input_size[1]
+
+    for i, bbox in enumerate(bboxes_xywh):
+        center, scale = box2cs(bbox, aspect_ratio, bbox_scale_factor=1.25)
+        # prepare data
+        data = {
+            'image_path': img_or_path,
+            'center': center,
+            'scale': scale,
+            'rotation': 0,
+            'bbox_score': bbox[4] if len(bbox) == 5 else 1,
+            'sample_idx': i,
+        }
+        data = inference_pipeline(data)
+        batch_data.append(data)
+    
+    batch_data = collate(batch_data, samples_per_gpu=1)
+
+    # forward the model
+    with torch.no_grad():
+        trt_outputs = trt_model({'input.1': batch_data['img'].to(device)})
+    output2params = {
+        '3245': 'heatmap', 
+        '3401': 'smpl_pose', 
+        '3322': 'camera', 
+        '3323': 'smpl_beta'}
+    mesh_result = det_results[0].copy()
+    for k, v in trt_outputs.items():
+        mesh_result[output2params[k]]= v.detach().cpu().numpy()
+    return [mesh_result]
 
 def inference_image_based_model(
     model,
@@ -184,11 +273,16 @@ def inference_image_based_model(
 
     # forward the model
     with torch.no_grad():
-        results = model(
-            img=batch_data['img'],
-            img_metas=batch_data['img_metas'],
-            sample_idx=batch_data['sample_idx'],
-        )
+        import time
+        T = time.time()
+        for i in range(100):
+            results = model(
+                img=batch_data['img'],
+                img_metas=batch_data['img_metas'],
+                sample_idx=batch_data['sample_idx'],
+            )
+        print(time.time()-T)
+        model(batch_data)
 
     for idx in range(len(det_results)):
         mesh_result = det_results[idx].copy()

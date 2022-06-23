@@ -68,7 +68,17 @@ def rot6d_to_rotmat(x):
     a2 = x[:, :, 1]
     b1 = F.normalize(a1)
     b2 = F.normalize(a2 - torch.einsum('bi,bi->b', b1, a2).unsqueeze(-1) * b1)
-    b3 = torch.cross(b1, b2)
+    # b3 = torch.cross(b1, b2)
+
+    # normal = tu.cross(tv, dim=3)
+    tu = b1
+    tv = b2
+    b3 = torch.stack((
+    tu[...,1]*tv[...,2] - tu[...,2]*tv[...,1],
+    tu[...,2]*tv[...,0] - tu[...,0]*tv[...,2],
+    tu[...,0]*tv[...,1] - tu[...,1]*tv[...,0]), -1)
+    # print("cross all close", torch.allclose(normal, normal2))
+
     return torch.stack((b1, b2, b3), dim=-1)
 
 
