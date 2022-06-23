@@ -108,10 +108,16 @@ def pytorch2onnx(model,
 def parse_args():
     parser = argparse.ArgumentParser(
         description='Convert MMHuman3D models to ONNX')
-    parser.add_argument('--config', default='configs/pare/hrnet_w32_conv_pare_coco_cache.py', help='test config file path')
-    parser.add_argument('--checkpoint', default='data/checkpoints/hrnet_w32_conv_pare_mosh.pth', help='checkpoint file')
-    # parser.add_argument('--config', default='configs/hmr/resnet50_hmr_pw3d_e50_cache.py', help='test config file path')
-    # parser.add_argument('--checkpoint', default='data/checkpoints/resnet50_hmr_pw3d-04f40f58_20211201.pth', help='checkpoint file')
+    parser.add_argument(
+        '--config',
+        default='configs/pare/hrnet_w32_conv_pare_coco_cache.py',
+        help='test config file path')
+    parser.add_argument(
+        '--checkpoint',
+        default='data/checkpoints/hrnet_w32_conv_pare_mosh.pth',
+        help='checkpoint file')
+    # parser.add_argument('--config', default='configs/hmr/resnet50_hmr_pw3d_e50_cache.py', help='test config file path')  # noqa: E501
+    # parser.add_argument('--checkpoint', default='data/checkpoints/resnet50_hmr_pw3d-04f40f58_20211201.pth', help='checkpoint file')  # noqa: E501
     parser.add_argument('--show', default=True, help='show onnx graph')
     parser.add_argument('--output-file', type=str, default='pare.onnx')
     parser.add_argument('--opset-version', type=int, default=12)
@@ -163,4 +169,4 @@ if __name__ == '__main__':
         opset_version=args.opset_version,
         show=args.show,
         output_file=args.output_file,
-        verify=True) #args.verify)
+        verify=True)  # args.verify)

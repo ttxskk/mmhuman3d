@@ -85,17 +85,16 @@ class LoadImage:
         results['img'] = img
         return results
 
-def run_tensorrt_model(
-    trt_model,
-    img_or_path,
-    det_results,
-    bbox_thr=None,
-    format='xywh',
-    device='cuda'
-):
+
+def run_tensorrt_model(trt_model,
+                       img_or_path,
+                       det_results,
+                       bbox_thr=None,
+                       format='xywh',
+                       device='cuda'):
     # only two kinds of bbox format is supported.
     assert format in ['xyxy', 'xywh']
-    mesh_results = []
+    # mesh_results = []
     if len(det_results) == 0:
         return []
 
@@ -110,12 +109,12 @@ def run_tensorrt_model(
         det_results = [det_results[i] for i in valid_idx]
 
     if format == 'xyxy':
-        bboxes_xyxy = bboxes
+        # bboxes_xyxy = bboxes
         bboxes_xywh = xyxy2xywh(bboxes)
     else:
         # format is already 'xywh'
         bboxes_xywh = bboxes
-        bboxes_xyxy = xywh2xyxy(bboxes)
+        # bboxes_xyxy = xywh2xyxy(bboxes)
 
     # if bbox_thr remove all bounding box
     if len(bboxes_xywh) == 0:
@@ -124,8 +123,7 @@ def run_tensorrt_model(
     img_norm_cfg = dict(
         mean=[123.675, 116.28, 103.53],
         std=[58.395, 57.12, 57.375],
-        to_rgb=True
-    )
+        to_rgb=True)
     # build the data pipeline
     inference_pipeline = [
         LoadImage(),
@@ -136,7 +134,7 @@ def run_tensorrt_model(
             type='Collect',
             keys=['img', 'sample_idx'],
             meta_keys=['image_path', 'center', 'scale', 'rotation'])
-    ] 
+    ]
     inference_pipeline = Compose(inference_pipeline)
 
     assert len(bboxes[0]) in [4, 5]
@@ -159,21 +157,23 @@ def run_tensorrt_model(
         }
         data = inference_pipeline(data)
         batch_data.append(data)
-    
+
     batch_data = collate(batch_data, samples_per_gpu=1)
 
     # forward the model
     with torch.no_grad():
         trt_outputs = trt_model({'input.1': batch_data['img'].to(device)})
     output2params = {
-        '3245': 'heatmap', 
-        '3401': 'smpl_pose', 
-        '3322': 'camera', 
-        '3323': 'smpl_beta'}
+        '3245': 'heatmap',
+        '3401': 'smpl_pose',
+        '3322': 'camera',
+        '3323': 'smpl_beta'
+    }
     mesh_result = det_results[0].copy()
     for k, v in trt_outputs.items():
-        mesh_result[output2params[k]]= v.detach().cpu().numpy()
+        mesh_result[output2params[k]] = v.detach().cpu().numpy()
     return [mesh_result]
+
 
 def inference_image_based_model(
     model,
@@ -281,7 +281,7 @@ def inference_image_based_model(
                 img_metas=batch_data['img_metas'],
                 sample_idx=batch_data['sample_idx'],
             )
-        print(time.time()-T)
+        print(time.time() - T)
         model(batch_data)
 
     for idx in range(len(det_results)):

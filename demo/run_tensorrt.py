@@ -10,7 +10,6 @@ import mmcv
 import numpy as np
 import torch
 
-from mmhuman3d.apis import inference_image_based_model, init_model, run_tensorrt_model
 from mmhuman3d.core.renderer.mpr_renderer.smpl_realrender import \
     VisualizerMeshSMPL  # noqa: E501
 from mmhuman3d.models.body_models.builder import build_body_model
@@ -19,6 +18,9 @@ from mmhuman3d.utils.demo_utils import (
     convert_verts_to_cam_coord,
     process_mmdet_results,
 )
+
+from mmhuman3d.apis import (  # inference_image_based_model,; init_model,
+    run_tensorrt_model, )
 
 try:
     from mmdet.apis import inference_detector, init_detector
@@ -199,7 +201,7 @@ def inference_mesh():
                 det_results,
                 bbox_thr=args.bbox_thr,
                 format='xyxy')
-            
+
         t_info += stop_watch.report_strings()
         with mesh_result_queue_mutex:
             mesh_result_queue.append((ts_input, t_info, mesh_results))
@@ -252,14 +254,15 @@ def display():
 
                 pred_cams = mesh_results[0]['camera']
                 if 'vertices' not in mesh_results[0].keys():
-                    smpl_betas = torch.FloatTensor(mesh_results[0]['smpl_beta'])
-                    smpl_poses = torch.FloatTensor(mesh_results[0]['smpl_pose'])
-                    smpl_out =  body_model(
+                    smpl_betas = torch.FloatTensor(
+                        mesh_results[0]['smpl_beta'])
+                    smpl_poses = torch.FloatTensor(
+                        mesh_results[0]['smpl_pose'])
+                    smpl_out = body_model(
                         betas=smpl_betas,
-                        body_pose=smpl_poses[:,1:],
+                        body_pose=smpl_poses[:, 1:],
                         global_orient=smpl_poses[:, 0].unsqueeze(1),
-                        pose2rot=False                    
-                    )
+                        pose2rot=False)
                     verts = smpl_out['vertices'].detach().cpu().numpy()
                 else:
                     verts = mesh_results[0]['vertices']
@@ -385,9 +388,8 @@ def main():
     from mmcv.tensorrt import TRTWraper
     trt_file = '/home/zoeuser/mmhuman3d/pare.trt'
     input_names = ['input.1']
-    output_names =['3245', '3401', '3322', '3323']
+    output_names = ['3245', '3401', '3322', '3323']
     mesh_model = TRTWraper(trt_file, input_names, output_names)
-
 
     # frame buffer
     if args.buffer_size > 0:

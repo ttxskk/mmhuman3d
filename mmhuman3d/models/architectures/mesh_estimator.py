@@ -794,7 +794,7 @@ class ImageBodyModelEstimator(BodyModelEstimator):
         all_preds['image_path'] = image_path
         all_preds['image_idx'] = kwargs['sample_idx']
         return all_preds
-    
+
     def forward_dummy(self, img: torch.Tensor):
         output = self.backbone(img)
         if self.neck is not None:

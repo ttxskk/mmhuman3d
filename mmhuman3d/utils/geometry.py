@@ -73,10 +73,9 @@ def rot6d_to_rotmat(x):
     # normal = tu.cross(tv, dim=3)
     tu = b1
     tv = b2
-    b3 = torch.stack((
-    tu[...,1]*tv[...,2] - tu[...,2]*tv[...,1],
-    tu[...,2]*tv[...,0] - tu[...,0]*tv[...,2],
-    tu[...,0]*tv[...,1] - tu[...,1]*tv[...,0]), -1)
+    b3 = torch.stack((tu[..., 1] * tv[..., 2] - tu[..., 2] * tv[..., 1],
+                      tu[..., 2] * tv[..., 0] - tu[..., 0] * tv[..., 2],
+                      tu[..., 0] * tv[..., 1] - tu[..., 1] * tv[..., 0]), -1)
     # print("cross all close", torch.allclose(normal, normal2))
 
     return torch.stack((b1, b2, b3), dim=-1)

@@ -2,9 +2,9 @@ from mmhuman3d.apis import inference, test, train
 from mmhuman3d.apis.inference import (
     feature_extract,
     inference_image_based_model,
-    run_tensorrt_model,
     inference_video_based_model,
     init_model,
+    run_tensorrt_model,
 )
 from mmhuman3d.apis.test import (
     collect_results_cpu,

@@ -76,11 +76,11 @@ def onnx2tensorrt(onnx_file,
         trt_model = TRTWraper(trt_file, input_names, output_names)
         import time
         for i in range(100):
-            T =time.time()
+            T = time.time()
             for i in range(1000):
                 with torch.no_grad():
                     trt_outputs = trt_model({input_names[0]: input_img_cuda})
-            print(time.time()-T)
+            print(time.time() - T)
             trt_outputs = [
                 trt_outputs[_].detach().cpu().numpy() for _ in output_names
             ]
@@ -95,7 +95,10 @@ def onnx2tensorrt(onnx_file,
 def parse_args():
     parser = argparse.ArgumentParser(
         description='Convert MMHuman3D models from ONNX to TensorRT')
-    parser.add_argument('--model', default='/home/zoeuser/mmhuman3d/pare.onnx',help='Filename of the input ONNX model')
+    parser.add_argument(
+        '--model',
+        default='/home/zoeuser/mmhuman3d/pare.onnx',
+        help='Filename of the input ONNX model')
     parser.add_argument(
         '--trt-file',
         type=str,
@@ -144,7 +147,7 @@ if __name__ == '__main__':
         input_shape,
         args.max_batch_size,
         fp16_mode=args.fp16,
-        verify=True, # args.verify,
+        verify=True,  # args.verify,
         workspace_size=args.workspace_size)
 
     # Following strings of text style are from colorama package
