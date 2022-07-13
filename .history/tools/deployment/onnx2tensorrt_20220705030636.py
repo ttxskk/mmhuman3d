@@ -44,7 +44,8 @@ def onnx2tensorrt(onnx_file,
     trt_engine = onnx2trt(
         onnx_model,
         opt_shape_dict,
-        fp16_mode=fp16_mode)
+        fp16_mode=fp16_mode,
+        max_workspace_size=max_workspace_size)
     save_dir, _ = osp.split(trt_file)
     if save_dir:
         os.makedirs(save_dir, exist_ok=True)
