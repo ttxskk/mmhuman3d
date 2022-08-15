@@ -162,16 +162,11 @@ def run_tensorrt_model(trt_model,
 
     # forward the model
     with torch.no_grad():
-        trt_outputs = trt_model({'input.1': batch_data['img'].to(device)})
-    output2params = {
-        '3245': 'heatmap',
-        '3401': 'smpl_pose',
-        '3322': 'camera',
-        '3323': 'smpl_beta'
-    }
+        trt_outputs = trt_model({'input': batch_data['img'].to(device)})
+
     mesh_result = det_results[0].copy()
     for k, v in trt_outputs.items():
-        mesh_result[output2params[k]] = v.detach().cpu().numpy()
+        mesh_result[k] = v.detach().cpu().numpy()
     return [mesh_result]
 
 
@@ -273,16 +268,12 @@ def inference_image_based_model(
 
     # forward the model
     with torch.no_grad():
-        import time
-        T = time.time()
-        for i in range(100):
-            results = model(
-                img=batch_data['img'],
-                img_metas=batch_data['img_metas'],
-                sample_idx=batch_data['sample_idx'],
-            )
-        print(time.time() - T)
-        model(batch_data)
+        results = model(
+            img=batch_data['img'],
+            img_metas=batch_data['img_metas'],
+            sample_idx=batch_data['sample_idx'],
+        )
+        # model(batch_data)
 
     for idx in range(len(det_results)):
         mesh_result = det_results[idx].copy()

@@ -46,18 +46,35 @@ def pytorch2onnx(model,
                  opset_version=12,
                  show=False,
                  output_file='tmp.onnx',
-                 verify=False):
+                 verify=False,
+                 output_names=['heatmap', 'smpl_pose', 'camera', 'smpl_beta'],
+                 input_name = ['input']):
     """Convert pytorch model to onnx model.
 
     Args:
         model (:obj:`nn.Module`): The pytorch model to be exported.
         input_shape (tuple[int]): The input tensor shape of the model.
-        opset_version (int): Opset version of onnx used. Default: 11.
+        opset_version (int): Opset version of onnx used. Default: 12.
         show (bool): Determines whether to print the onnx model architecture.
             Default: False.
         output_file (str): Output onnx model name. Default: 'tmp.onnx'.
         verify (bool): Determines whether to verify the onnx model.
             Default: False.
+        output_names (list): Output names for the output nodes defined in
+            the onnx model. If the exported model is pare, this list
+            should be ['heatmap', 'smpl_pose', 'camera', 'smpl_beta'].
+            Default: ['heatmap', 'smpl_pose', 'camera', 'smpl_beta'].
+            
+            Note: this list may affect the inference process (run_tensorrt_model)
+                defined in `apis/inference.py`. If you want to deploy other models,
+                please check the onnx output node and assign a corresponding output
+                name list. For example, if the dimension of the elements in the
+                output node list is `[[b, 3], [b, 24, 3, 3], [b, 10]` ,
+                the corresponding output name list is
+                `[camera, smpl_pose, smpl_beta]`.
+                
+        input_name (list): Input name for the input nodes defined in the onnx
+            model. Default: ['input'].
     """
     model.cpu().eval()
 
@@ -68,6 +85,8 @@ def pytorch2onnx(model,
         model,
         one_img,
         output_file,
+        input_names=input_name,
+        output_names=output_names,
         export_params=True,
         keep_initializers_as_inputs=True,
         verbose=show,
@@ -118,8 +137,27 @@ def parse_args():
         help='checkpoint file')
     # parser.add_argument('--config', default='configs/hmr/resnet50_hmr_pw3d_e50_cache.py', help='test config file path')  # noqa: E501
     # parser.add_argument('--checkpoint', default='data/checkpoints/resnet50_hmr_pw3d-04f40f58_20211201.pth', help='checkpoint file')  # noqa: E501
-    parser.add_argument('--show', default=True, help='show onnx graph')
-    parser.add_argument('--output-file', type=str, default='pare.onnx')
+    parser.add_argument(
+        '--output-names',
+        type=list,
+        default=['heatmap', 'smpl_pose', 'camera', 'smpl_beta'],
+        help="Output names for the output nodes defined in the onnx model." 
+            "If the exported model is pare, this list should be"
+            " [`heatmap`, `smpl_pose`, `camera`, `smpl_beta`].")
+    parser.add_argument(
+        '--input_name',
+        type=list,
+        default=['input'],
+        help="Input name for the input nodes defined in the onnx"
+            " model. Default: ['input'].")   
+    parser.add_argument(
+        '--show',
+        default=True,
+        help='show onnx graph')
+    parser.add_argument(
+        '--output-file',
+        type=str,
+        default='data/checkpoints/pare.onnx')
     parser.add_argument('--opset-version', type=int, default=12)
     parser.add_argument(
         '--verify',
@@ -138,7 +176,7 @@ def parse_args():
 if __name__ == '__main__':
     args = parse_args()
 
-    assert args.opset_version == 12, 'MMPose only supports opset 11 now'
+    assert args.opset_version == 12, 'MMPose only supports opset 12 now'
 
     # Following strings of text style are from colorama package
     bright_style, reset_style = '\x1b[1m', '\x1b[0m'
@@ -169,4 +207,6 @@ if __name__ == '__main__':
         opset_version=args.opset_version,
         show=args.show,
         output_file=args.output_file,
-        verify=True)  # args.verify)
+        verify=True,
+        output_names=args.output_names,
+        input_name=args.input_name)  # args.verify)

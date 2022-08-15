@@ -44,7 +44,8 @@ def onnx2tensorrt(onnx_file,
     trt_engine = onnx2trt(
         onnx_model,
         opt_shape_dict,
-        fp16_mode=fp16_mode)
+        fp16_mode=fp16_mode,
+        max_workspace_size=max_workspace_size)
     save_dir, _ = osp.split(trt_file)
     if save_dir:
         os.makedirs(save_dir, exist_ok=True)
@@ -80,9 +81,9 @@ def onnx2tensorrt(onnx_file,
                 with torch.no_grad():
                     trt_outputs = trt_model({input_names[0]: input_img_cuda})
             print(time.time() - T)
-            trt_outputs = [
-                trt_outputs[_].detach().cpu().numpy() for _ in output_names
-            ]
+        trt_outputs = [
+            trt_outputs[_].detach().cpu().numpy() for _ in output_names
+        ]
 
         # Compare results
         np.testing.assert_allclose(
@@ -96,16 +97,17 @@ def parse_args():
         description='Convert MMHuman3D models from ONNX to TensorRT')
     parser.add_argument(
         '--model',
-        default='E:/sqp/mmhuman3d/pare.onnx',
+        default='data/checkpoints/pare.onnx',
         help='Filename of the input ONNX model')
     parser.add_argument(
         '--trt-file',
         type=str,
-        default='pare.trt',
+        default='data/checkpoints/pare.trt',
         help='Filename of the output TensorRT engine')
     parser.add_argument(
         '--verify',
-        action='store_true',
+        type=str,
+        default=True,
         help='Verify the outputs of ONNXRuntime and TensorRT')
     parser.add_argument(
         '--shape',
@@ -118,7 +120,7 @@ def parse_args():
         type=int,
         default=1,
         help='Maximum batch size of TensorRT model.')
-    parser.add_argument('--fp16', action='store_true', help='Enable fp16 mode')
+    parser.add_argument('--fp16', default=True, help='Enable fp16 mode')
     parser.add_argument(
         '--workspace-size',
         type=int,
@@ -146,7 +148,7 @@ if __name__ == '__main__':
         input_shape,
         args.max_batch_size,
         fp16_mode=args.fp16,
-        verify=True,  # args.verify,
+        verify=args.verify,
         workspace_size=args.workspace_size)
 
     # Following strings of text style are from colorama package

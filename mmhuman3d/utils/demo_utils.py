@@ -312,15 +312,13 @@ def convert_verts_to_cam_coord(verts,
         verts = np.einsum('fij,fkj->fki', Ks, verts[None])
     return verts, K0
 
-
-def smooth_process(x,
-                   smooth_type='savgol',
-                   cfg_base_dir='configs/_base_/post_processing/'):
-    """Smooth the array with the specified smoothing type.
+def build_smooth_func(
+    smooth_type,
+    cfg_base_dir='configs/_base_/post_processing/',
+    window_size=None):
+    """Build smooth function.
 
     Args:
-        x (np.ndarray): Shape should be (frame,num_person,K,C)
-            or (frame,K,C).
         smooth_type (str, optional): Smooth type.
             choose in ['oneeuro', 'gaus1d', 'savgol','smoothnet',
                 'smoothnet_windowsize8','smoothnet_windowsize16',
@@ -328,12 +326,12 @@ def smooth_process(x,
             Defaults to 'savgol'. 'smoothnet' is default with windowsize=8.
         cfg_base_dir (str, optional): Config base dir,
                             default configs/_base_/post_processing/
+        window_size (str): the size of the filter window
     Raises:
         ValueError: check the input smoothing type.
 
     Returns:
-        np.ndarray: Smoothed data. The shape should be
-            (frame,num_person,K,C) or (frame,K,C).
+        the builded function.
     """
     if smooth_type == 'smoothnet':
         smooth_type = 'smoothnet_windowsize8'
@@ -342,21 +340,35 @@ def smooth_process(x,
         'oneeuro', 'gaus1d', 'savgol', 'smoothnet_windowsize8',
         'smoothnet_windowsize16', 'smoothnet_windowsize32',
         'smoothnet_windowsize64'
-    ]
-
+    ]    
     cfg = os.path.join(cfg_base_dir, smooth_type + '.py')
     if isinstance(cfg, str):
         cfg = mmcv.Config.fromfile(cfg)
+        if 'window_size' in cfg['smooth_cfg'] and \
+            window_size is not None:
+            cfg.smooth_cfg.window_size=window_size
     elif not isinstance(cfg, mmcv.Config):
         raise TypeError('config must be a filename or Config object, '
                         f'but got {type(cfg)}')
-
-    x = x.copy()
-
-    assert x.ndim == 3 or x.ndim == 4
-
     smooth_func = build_post_processing(dict(cfg['smooth_cfg']))
+    return smooth_func
 
+def smooth_process(x,
+                   smooth_func):
+    """Smooth the array with the specified smoothing type.
+
+    Args:
+        x (np.ndarray): Shape should be (frame,num_person,K,C)
+            or (frame,K,C).
+        smooth_func : the builded function.
+
+    Returns:
+        np.ndarray: Smoothed data. The shape should be
+            (frame,num_person,K,C) or (frame,K,C).
+    """
+    x = x.copy()
+    assert x.ndim == 3 or x.ndim == 4
+    
     if x.ndim == 4:
         for i in range(x.shape[1]):
             x[:, i] = smooth_func(x[:, i])

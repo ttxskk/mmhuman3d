@@ -5,13 +5,23 @@ from collections import deque
 from queue import Queue
 from threading import Event, Lock, Thread
 
+import requests
+import socket
+import json
 import cv2
 import mmcv
 import numpy as np
 import torch
 
-from mmhuman3d.core.renderer.mpr_renderer.smpl_realrender import \
-    VisualizerMeshSMPL  # noqa: E501
+from mmhuman3d.utils.transforms import rotmat_to_aa
+from mmhuman3d.retargeting.fast_retargeting import retarget as fast_retarget
+from mmhuman3d.retargeting.fast_retargeting import (
+    XIAOTAO_NAME_TO_BONE,
+    SMPL_NAME_TO_BONE,
+    SRC_SKELETON_JSON,
+    TGT_SKELETON_JSON
+)
+
 from mmhuman3d.models.body_models.builder import build_body_model
 from mmhuman3d.utils.demo_utils import (
     StopWatch,
@@ -86,7 +96,7 @@ def parse_args():
     parser.add_argument(
         '--out_video_fps',
         type=int,
-        default=30,
+        default=15,
         help='Set the FPS of the output video file.')
     parser.add_argument(
         '--buffer_size',
@@ -97,7 +107,7 @@ def parse_args():
     parser.add_argument(
         '--inference_fps',
         type=int,
-        default=30,
+        default=15,
         help='Maximum inference FPS. This is to limit the resource consuming '
         'especially when the detection and pose model are lightweight and '
         'very fast. Default: 10.')
@@ -152,7 +162,7 @@ def read_camera():
 
 def inference_detection():
     print('Thread "det" started')
-    stop_watch = StopWatch(window=10)
+    stop_watch = StopWatch(window=1)
     min_interval = 1.0 / args.inference_fps
     _ts_last = None  # timestamp when last inference was done
 
@@ -163,7 +173,12 @@ def inference_detection():
             ts_input, frame = input_queue.popleft()
         # inference detection
         with stop_watch.timeit('Det'):
-            mmdet_results = inference_detector(det_model, frame)
+            import time as Time
+            T = Time.time()
+            for i in range(1):
+                mmdet_results = inference_detector(det_model, frame)
+            print(f"Det: {Time.time() - T}")
+            # mmdet_results = inference_detector(det_model, frame)
         t_info = stop_watch.report_strings()
         with det_result_queue_mutex:
             det_result_queue.append((ts_input, frame, t_info, mmdet_results))
@@ -177,51 +192,56 @@ def inference_detection():
 
 def inference_mesh():
     print('Thread "mesh" started')
-    stop_watch = StopWatch(window=10)
+    stop_watch = StopWatch(window=1)
 
     while True:
-        while len(det_result_queue) < 1:
+        while len(input_queue) < 1:
             time.sleep(0.001)
-        with det_result_queue_mutex:
-            ts_input, frame, t_info, mmdet_results = det_result_queue.popleft()
-
+        # with det_result_queue_mutex:
+        #     ts_input, frame, t_info, mmdet_results = det_result_queue.popleft()
+        with input_queue_mutex:
+            ts_input, frame = input_queue.popleft()
         with stop_watch.timeit('Mesh'):
-            det_results = process_mmdet_results(
-                mmdet_results, cat_id=args.det_cat_id, bbox_thr=args.bbox_thr)
-            mesh_results = run_tensorrt_model(
-                mesh_model,
-                frame,
-                det_results,
-                bbox_thr=args.bbox_thr,
-                format='xyxy')
+            # det_results = process_mmdet_results(
+            #     mmdet_results, cat_id=args.det_cat_id, bbox_thr=args.bbox_thr)
+            det_results = [{'bbox': np.array([0,0,1080,1920,1])}]
+            import time as TIME
+            T = TIME.time()
+            for i in range(1):
+                mesh_results = run_tensorrt_model(
+                    mesh_model,
+                    frame,
+                    det_results,
+                    bbox_thr=args.bbox_thr,
+                    format='xyxy')
+                
+            print(f"Mesh: {TIME.time()-T}")
 
-        t_info += stop_watch.report_strings()
+            # mesh_results = run_tensorrt_model(
+            #     mesh_model,
+            #     frame,
+            #     det_results,
+            #     bbox_thr=args.bbox_thr,
+            #     format='xyxy')
+
+        # t_info += stop_watch.report_strings()
+        t_info = stop_watch.report_strings()
         with mesh_result_queue_mutex:
             mesh_result_queue.append((ts_input, t_info, mesh_results))
 
         event_inference_done.set()
 
-
-def display():
-    print('Thread "display" started')
+def retargeting():
+    print('Thread "retargeting" started')
     stop_watch = StopWatch(window=10)
-
+ 
     # initialize result status
     ts_inference = None  # timestamp of the latest inference result
     fps_inference = 0.  # infenrece FPS
     t_delay_inference = 0.  # inference result time delay
     mesh_results = None
     t_info = []  # upstream time information (list[str])
-
-    # initialize visualization and output
-    text_color = (228, 183, 61)  # text color to show time/system information
-    vid_out = None  # video writer
-
-    # show instructions
-    print('Keyboard shortcuts: ')
-    print('"v": Toggle the visualization of bounding boxes and meshes.')
-    print('"Q", "q" or Esc: Exit.')
-
+    
     while True:
         with stop_watch.timeit('_FPS_'):
             # acquire a frame from buffer
@@ -229,9 +249,7 @@ def display():
             # input ending signal
             if ts_input is None:
                 break
-
-            img = frame
-
+            
             # get mesh estimation results
             if len(mesh_result_queue) > 0:
                 with mesh_result_queue_mutex:
@@ -242,40 +260,75 @@ def display():
                 if ts_inference is not None:
                     fps_inference = 1.0 / (_ts - ts_inference)
                 ts_inference = _ts
-                t_delay_inference = (_ts - _ts_input) * 1000
+                t_delay_inference = (_ts - _ts_input) * 1000            
+                        
             if mesh_results:
-
                 pred_cams = mesh_results[0]['camera']
-                if 'vertices' not in mesh_results[0].keys():
-                    smpl_betas = torch.FloatTensor(
-                        mesh_results[0]['smpl_beta'])
-                    smpl_poses = torch.FloatTensor(
-                        mesh_results[0]['smpl_pose'])
-                    smpl_out = body_model(
-                        betas=smpl_betas,
-                        body_pose=smpl_poses[:, 1:],
-                        global_orient=smpl_poses[:, 0].unsqueeze(1),
-                        pose2rot=False)
-                    verts = smpl_out['vertices'].detach().cpu().numpy()
+                transl = np.concatenate([
+                    pred_cams[..., [1]], pred_cams[..., [2]], 2 * 5000. /
+                    (224 * pred_cams[..., [0]] + 1e-9)
+                ], -1)            
+                smpl_poses = mesh_results[0]['smpl_pose']
+                if smpl_poses.shape[1:] == (24, 3, 3):
+                    smpl_poses = rotmat_to_aa(smpl_poses)
+                elif smpl_poses.shape[1:] == (24, 3):
+                    smpl_poses = smpl_poses
                 else:
-                    verts = mesh_results[0]['vertices']
-                bboxes_xyxy = mesh_results[0]['bbox']
-                verts, _ = convert_verts_to_cam_coord(
-                    verts, pred_cams, bboxes_xyxy, focal_length=5000.)
+                    raise (f'Wrong shape of `smpl_pose`: {smpl_poses.shape}')
+                body_pose=smpl_poses[:, 1:]
+                global_orient=smpl_poses[:, 0]
+                smpl_beta = mesh_results[0]['smpl_beta']
+                
+                smpl_dict ={
+                    'body_pose':body_pose,
+                    'global_orient':global_orient,
+                    'betas':smpl_beta,
+                    # 'transl':transl
+                    }
+                # params = {
+                #     'human_data':smpl_dict,
+                #     "actor_type":"MXJBald",
+                #     "motion_category":"human_data",
+                #     "regenerate":False,
+                #     "output_smplx":False,
+                #     "output_bbox":False,
+                #     "output_fbx":True,
+                #     "output_mo_json":True                  
+                #     }
+                # retarget_url = 'http://10.10.30.159:8763/api/v1/retargeting/retarget/'
+                # resp = requests.post(retarget_url, json=params)
+                # resp_json = resp.json()
+                # if not resp_json.get('code') == 200:
+                #     err_msg = (
+                #         f'Error response from POST {retarget_url}'
+                #         f'Response:\n{resp_json}'
+                #     )
+                #     # print(err_msg)
+                #     raise RuntimeError(err_msg)
+                # retarget_result = resp_json['content']['mo_json']
 
-                # show bounding boxes
-                mmcv.imshow_bboxes(
-                    img,
-                    bboxes_xyxy[None],
-                    colors='green',
-                    top_k=-1,
-                    thickness=2,
-                    show=False)
-
-                # visualize smpl
-                if isinstance(verts, np.ndarray):
-                    verts = torch.tensor(verts).to(args.device).squeeze()
-                img = renderer(verts, img)
+                # client.sendall(bytes(json.dumps(retarget_result)),encoding='utf-8')
+                # server_reply = client.recv(1024).decode()
+                # if server_reply.lower() == 'exit':
+                #     break
+                
+                import time as TIME
+                T = TIME.time()
+                for i in range(30):
+                    motion_data, src_motion_data = fast_retarget(
+                        smpl_dict,
+                        tgt_name2bone=XIAOTAO_NAME_TO_BONE,
+                        src_name2bone=SMPL_NAME_TO_BONE,
+                        src_skeleton_json=SRC_SKELETON_JSON,
+                        tgt_skeleton_json=TGT_SKELETON_JSON,
+                        insert_src_rest_pose_at_0=True,
+                    )
+                    
+                print(f"Ret: {TIME.time()-T}")
+                
+                # motion_data = json.dumps(motion_data).encode('UTF-16LE')
+                # client.sendto(motion_data,(target_ip,target_port))
+                
 
             # delay control
             if args.display_delay > 0:
@@ -292,11 +345,8 @@ def display():
             t_info_display.append(
                 f'Inference Delay: {t_delay_inference:>3.0f}')
             t_info_str = ' | '.join(t_info_display + t_info)
-            cv2.putText(img, t_info_str, (20, 20), cv2.FONT_HERSHEY_DUPLEX,
-                        0.3, text_color, 1)
-            # collect system information
             sys_info = [
-                f'RES: {img.shape[1]}x{img.shape[0]}',
+                # f'RES: {img.shape[1]}x{img.shape[0]}',
                 f'Buffer: {frame_buffer.qsize()}/{frame_buffer.maxsize}'
             ]
             if psutil_proc is not None:
@@ -305,32 +355,17 @@ def display():
                     f'MEM: {psutil_proc.memory_percent():.1f}%'
                 ]
             sys_info_str = ' | '.join(sys_info)
-            cv2.putText(img, sys_info_str, (20, 40), cv2.FONT_HERSHEY_DUPLEX,
-                        0.3, text_color, 1)
-
-            # save the output video frame
-            if args.out_video_file is not None:
-                if vid_out is None:
-                    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-                    fps = args.out_video_fps
-                    frame_size = (img.shape[1], img.shape[0])
-                    vid_out = cv2.VideoWriter(args.out_video_file, fourcc, fps,
-                                              frame_size)
-
-                vid_out.write(img)
-
-            # display
-            cv2.imshow('mmhuman3d webcam demo', img)
-            keyboard_input = cv2.waitKey(1)
-            if keyboard_input in (27, ord('q'), ord('Q')):
-                break
-
-    cv2.destroyAllWindows()
-    if vid_out is not None:
-        vid_out.release()
-    event_exit.set()
-
-
+            
+            print(t_info_str)
+            print(sys_info_str)
+            # print(
+            #     f'Inference FPS: {fps_inference:>5.1f}, '
+            #     f'Inference Delay: {t_delay_inference:>3.0f} '
+            #     f'Delay: {t_delay:>3.0f}'
+            # )
+                
+            
+                        
 def main():
     global args
     global frame_buffer
@@ -339,13 +374,25 @@ def main():
     global mesh_result_queue, mesh_result_queue_mutex
     global det_model, mesh_model, extractor
     global event_exit, event_inference_done
-    global renderer
     global body_model
+    
+    global client
+    global target_ip
+    global target_port
+    
     args = parse_args()
     assert has_mmdet, 'Please install mmdet to run the demo.'
     assert args.det_config is not None
     assert args.det_checkpoint is not None
-
+    
+    # set conn
+    client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    target_ip = 'localhost'
+    target_port = 54321
+    # ip_addr = ('localhost',8888) 
+    # client.connect(ip_addr)
+    
+    args.cam_id = 'demo/resources/single_person_demo.mp4'
     cam_id = args.cam_id
     if cam_id.isdigit():
         cam_id = int(cam_id)
@@ -363,13 +410,10 @@ def main():
             gender='neutral',
             num_betas=10,
             model_path=args.body_model_dir))
-    # build renderer
-    renderer = VisualizerMeshSMPL(
-        device=args.device, body_models=body_model, resolution=resolution)
 
     # build detection model
-    det_model = init_detector(
-        args.det_config, args.det_checkpoint, device=args.device.lower())
+    # det_model = init_detector(
+    #     args.det_config, args.det_checkpoint, device=args.device.lower())
 
     # build human3d models
 
@@ -379,7 +423,7 @@ def main():
     #     device=args.device.lower())
 
     from mmcv.tensorrt import TRTWraper
-    trt_file = '/home/zoeuser/mmhuman3d/pare.trt'
+    trt_file = 'pare.trt'
     input_names = ['input.1']
     output_names = ['3245', '3401', '3322', '3323']
     mesh_model = TRTWraper(trt_file, input_names, output_names)
@@ -400,8 +444,8 @@ def main():
 
     # queue of detection results
     # element: tuple(timestamp, frame, time_info, det_results)
-    det_result_queue = deque(maxlen=1)
-    det_result_queue_mutex = Lock()
+    # det_result_queue = deque(maxlen=1)
+    # det_result_queue_mutex = Lock()
 
     # queue of detection/pose results
     # element: (timestamp, time_info, pose_results_list)
@@ -412,15 +456,15 @@ def main():
         event_exit = Event()
         event_inference_done = Event()
         t_input = Thread(target=read_camera, args=())
-        t_det = Thread(target=inference_detection, args=(), daemon=True)
+        # t_det = Thread(target=inference_detection, args=(), daemon=True)
         t_mesh = Thread(target=inference_mesh, args=(), daemon=True)
 
         t_input.start()
-        t_det.start()
+        # t_det.start()
         t_mesh.start()
 
-        # run display in the main thread
-        display()
+        # run retargeting in the main thread
+        retargeting()
         # join the input thread (non-daemon)
         t_input.join()
 
